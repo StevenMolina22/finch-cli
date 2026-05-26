@@ -3,6 +3,7 @@ module finch
 go 1.25.9
 
 require (
+	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 	github.com/tursodatabase/libsql-client-go v0.0.0-20260514053736-a9a8fadfe885
 )
