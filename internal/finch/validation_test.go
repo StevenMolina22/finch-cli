@@ -56,6 +56,81 @@ func TestFormatAmount(t *testing.T) {
 	}
 }
 
+func TestValidateLimit(t *testing.T) {
+	if err := ValidateLimit(5); err != nil {
+		t.Fatalf("ValidateLimit(5) error = %v", err)
+	}
+	if err := ValidateLimit(0); err == nil {
+		t.Fatal("ValidateLimit(0) expected error")
+	}
+	if err := ValidateLimit(-1); err == nil {
+		t.Fatal("ValidateLimit(-1) expected error")
+	}
+}
+
+func TestValidateRecurring(t *testing.T) {
+	valid := []string{"", "monthly", "weekly", "yearly"}
+	for _, v := range valid {
+		t.Run("valid "+v, func(t *testing.T) {
+			if err := ValidateRecurring(v); err != nil {
+				t.Fatalf("ValidateRecurring(%q) error = %v", v, err)
+			}
+		})
+	}
+
+	invalid := []string{"daily", "annually", "biweekly"}
+	for _, v := range invalid {
+		t.Run("invalid "+v, func(t *testing.T) {
+			if err := ValidateRecurring(v); err == nil {
+				t.Fatalf("ValidateRecurring(%q) expected error", v)
+			}
+		})
+	}
+}
+
+func TestValidateEditFields(t *testing.T) {
+	if err := ValidateEditFields(EditInput{ID: 1, AmountCents: ptr[int64](1000)}); err != nil {
+		t.Fatalf("ValidateEditFields with amount error = %v", err)
+	}
+	if err := ValidateEditFields(EditInput{ID: 1, Category: ptr("food")}); err != nil {
+		t.Fatalf("ValidateEditFields with category error = %v", err)
+	}
+	if err := ValidateEditFields(EditInput{ID: 1}); err == nil {
+		t.Fatal("ValidateEditFields with no changes expected error")
+	}
+}
+
+func TestValidateImportRows(t *testing.T) {
+	valid := []ImportRow{
+		{Type: "income", Amount: "100.00", Category: "salary"},
+		{Type: "expense", Amount: "25.50", Category: "food", Desc: "lunch", Date: "2026-05-01"},
+		{Type: "income", Amount: "50", Category: "freelance", Tags: "work", Recurring: "monthly"},
+	}
+	if err := ValidateImportRows(valid); err != nil {
+		t.Fatalf("ValidateImportRows valid rows error = %v", err)
+	}
+
+	invalid := []struct {
+		name string
+		rows []ImportRow
+	}{
+		{name: "invalid type", rows: []ImportRow{{Type: "transfer", Amount: "10", Category: "cat"}}},
+		{name: "invalid amount", rows: []ImportRow{{Type: "income", Amount: "1.999", Category: "cat"}}},
+		{name: "empty category", rows: []ImportRow{{Type: "income", Amount: "10", Category: ""}}},
+		{name: "invalid date", rows: []ImportRow{{Type: "income", Amount: "10", Category: "cat", Date: "2026/05/01"}}},
+		{name: "invalid recurring", rows: []ImportRow{{Type: "income", Amount: "10", Category: "cat", Recurring: "daily"}}},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateImportRows(tt.rows); err == nil {
+				t.Fatal("ValidateImportRows expected error")
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 func TestValidateMonth(t *testing.T) {
 	valid := []string{"", "2026-05", "1999-12"}
 	for _, month := range valid {

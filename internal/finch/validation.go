@@ -1,11 +1,17 @@
 package finch
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrTransactionNotFound is returned by store operations (Delete, Update)
+// when the targeted transaction does not exist. Callers can use errors.Is
+// to detect this without relying on error message text.
+var ErrTransactionNotFound = errors.New("transaction not found")
 
 func ValidateType(typ string) error {
 	if typ != TypeIncome && typ != TypeExpense {
@@ -76,6 +82,66 @@ func ValidateMonth(month string) error {
 	parsed, err := time.Parse("2006-01", month)
 	if err != nil || parsed.Format("2006-01") != month {
 		return fmt.Errorf("month must use YYYY-MM format")
+	}
+	return nil
+}
+
+// ValidateDate verifies that value is a calendar date formatted as YYYY-MM-DD.
+// An empty string is considered valid (callers default to the current date).
+func ValidateDate(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil || parsed.Format("2006-01-02") != value {
+		return fmt.Errorf("date must use YYYY-MM-DD format")
+	}
+	return nil
+}
+
+func ValidateLimit(limit int) error {
+	if limit <= 0 {
+		return fmt.Errorf("limit must be a positive integer")
+	}
+	return nil
+}
+
+func ValidateRecurring(value string) error {
+	if value == "" {
+		return nil
+	}
+	if value != "monthly" && value != "weekly" && value != "yearly" {
+		return fmt.Errorf("recurring must be %q, %q, or %q", "monthly", "weekly", "yearly")
+	}
+	return nil
+}
+
+func ValidateEditFields(input EditInput) error {
+	if input.AmountCents == nil && input.Category == nil && input.Desc == nil && input.Tags == nil && input.Recurring == nil {
+		return fmt.Errorf("at least one field must be changed")
+	}
+	return nil
+}
+
+func ValidateImportRows(rows []ImportRow) error {
+	for i, row := range rows {
+		if err := ValidateType(row.Type); err != nil {
+			return fmt.Errorf("row %d: invalid type: %w", i+1, err)
+		}
+		if _, err := ParseAmount(row.Amount); err != nil {
+			return fmt.Errorf("row %d: invalid amount: %w", i+1, err)
+		}
+		if strings.TrimSpace(row.Category) == "" {
+			return fmt.Errorf("row %d: category is required", i+1)
+		}
+		if row.Date != "" {
+			if _, err := time.Parse("2006-01-02", row.Date); err != nil {
+				return fmt.Errorf("row %d: invalid date %q, expected YYYY-MM-DD", i+1, row.Date)
+			}
+		}
+		if err := ValidateRecurring(strings.TrimSpace(row.Recurring)); err != nil {
+			return fmt.Errorf("row %d: %w", i+1, err)
+		}
 	}
 	return nil
 }
