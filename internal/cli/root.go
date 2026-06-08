@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"finch/internal/finch"
+	finchmcp "finch/internal/mcp"
 	"finch/internal/server"
 
 	"github.com/spf13/cobra"
@@ -29,13 +31,25 @@ type Store interface {
 
 type OpenStoreFunc func(context.Context) (Store, error)
 
+// MCPRunFunc is the entry point invoked by the mcp command. It is a
+// separate type so tests can swap in a no-op that captures the resolved
+// options without binding to a real port.
+type MCPRunFunc func(ctx context.Context, transport finchmcp.Transport, opts finchmcp.Options) error
+
+// defaultMCPRun is the production MCPRunFunc that delegates to
+// finchmcp.Run.
+func defaultMCPRun(ctx context.Context, transport finchmcp.Transport, opts finchmcp.Options) error {
+	return finchmcp.Run(ctx, transport, opts)
+}
+
 func NewRootCommand(openStore OpenStoreFunc, now func() time.Time) *cobra.Command {
-	return newRootCommand(openStore, now, server.Listen)
+	return newRootCommand(openStore, now, server.Listen, defaultMCPRun)
 }
 
 // newRootCommand is the internal constructor used by tests to inject a
-// custom listen function for the serve command.
-func newRootCommand(openStore OpenStoreFunc, now func() time.Time, listen ListenFunc) *cobra.Command {
+// custom listen function for the serve command and a custom MCP run
+// function for the mcp command.
+func newRootCommand(openStore OpenStoreFunc, now func() time.Time, listen ListenFunc, mcpRun MCPRunFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "finch",
 		Short:         "Minimal personal finance tracking",
@@ -51,6 +65,7 @@ func newRootCommand(openStore OpenStoreFunc, now func() time.Time, listen Listen
 	cmd.AddCommand(newExportCommand(openStore))
 	cmd.AddCommand(newImportCommand(openStore))
 	cmd.AddCommand(newServeCommand(openStore, now, listen))
+	cmd.AddCommand(newMCPCommand(openStore, mcpRun))
 	return cmd
 }
 
@@ -548,4 +563,93 @@ func (a storeAdapter) Update(ctx context.Context, input finch.EditInput) error {
 
 func (a storeAdapter) Delete(ctx context.Context, id int64) error {
 	return a.store.Delete(ctx, id)
+}
+
+// mcpStoreAdapter exposes a Store as a finchmcp.Store, satisfying the
+// smaller interface the MCP tool handlers require.
+type mcpStoreAdapter struct {
+	store Store
+}
+
+func (a mcpStoreAdapter) Add(ctx context.Context, input finch.AddInput) error {
+	return a.store.Add(ctx, input)
+}
+
+func (a mcpStoreAdapter) List(ctx context.Context, filter finch.ListFilter) ([]finch.Transaction, error) {
+	return a.store.List(ctx, filter)
+}
+
+func (a mcpStoreAdapter) Summary(ctx context.Context, month string) (finch.Summary, error) {
+	return a.store.Summary(ctx, month)
+}
+
+func (a mcpStoreAdapter) Update(ctx context.Context, input finch.EditInput) error {
+	return a.store.Update(ctx, input)
+}
+
+func (a mcpStoreAdapter) Delete(ctx context.Context, id int64) error {
+	return a.store.Delete(ctx, id)
+}
+
+// loadMCPAuthConfig reads the bearer token environment variables used by
+// the HTTP MCP transport. The returned config may be empty; callers must
+// reject HTTP startup when no token is configured.
+func loadMCPAuthConfig() finchmcp.AuthConfig {
+	return finchmcp.AuthConfig{
+		ReadToken:  strings.TrimSpace(os.Getenv("FINCH_MCP_READ_TOKEN")),
+		WriteToken: strings.TrimSpace(os.Getenv("FINCH_MCP_WRITE_TOKEN")),
+	}
+}
+
+func newMCPCommand(openStore OpenStoreFunc, mcpRun MCPRunFunc) *cobra.Command {
+	var transport string
+	var addr string
+
+	cmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "Start the MCP (Model Context Protocol) server",
+		Long: "Start Finch as an MCP server. The default transport is HTTP on :3333, " +
+			"intended for remote AI clients. Use --transport http --addr to change the listener.\n\n" +
+			"Remote HTTP MCP requires HTTPS in deployment (use a reverse proxy or a hosting " +
+			"platform that terminates TLS). HTTP startup refuses to bind when no auth token is " +
+			"configured via FINCH_MCP_READ_TOKEN and/or FINCH_MCP_WRITE_TOKEN. " +
+			"A write token can call read and write tools; a read token can call read tools only.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var mcpTransport finchmcp.Transport
+			switch strings.ToLower(strings.TrimSpace(transport)) {
+			case string(finchmcp.TransportHTTP), "":
+				mcpTransport = finchmcp.TransportHTTP
+			case string(finchmcp.TransportStdio):
+				mcpTransport = finchmcp.TransportStdio
+			default:
+				return fmt.Errorf("%w: %q (supported: %s, %s)",
+					finchmcp.ErrUnsupportedTransport, transport,
+					finchmcp.TransportHTTP, finchmcp.TransportStdio)
+			}
+
+			if mcpTransport == finchmcp.TransportHTTP {
+				auth := loadMCPAuthConfig()
+				if auth.IsEmpty() {
+					return errors.New("HTTP MCP transport requires FINCH_MCP_READ_TOKEN and/or FINCH_MCP_WRITE_TOKEN")
+				}
+			}
+
+			store, err := openStore(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			return mcpRun(cmd.Context(), mcpTransport, finchmcp.Options{
+				Store: mcpStoreAdapter{store: store},
+				Auth:  loadMCPAuthConfig(),
+				Addr:  addr,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&transport, "transport", string(finchmcp.TransportHTTP), "MCP transport: http or stdio")
+	cmd.Flags().StringVar(&addr, "addr", ":3333", "address to listen on for HTTP transport (e.g. 127.0.0.1:3333)")
+	return cmd
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"finch/internal/finch"
+	finchmcp "finch/internal/mcp"
 	"finch/internal/server"
 
 	"github.com/gofiber/fiber/v2"
@@ -253,7 +254,7 @@ func TestServeCommandOpensStoreAndUsesInjectedListen(t *testing.T) {
 
 	cmd := newRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
-	}, time.Now, listen)
+	}, time.Now, listen, defaultMCPRun)
 
 	if err := execute(cmd, "serve", "--addr", "127.0.0.1:8080"); err != nil {
 		t.Fatalf("execute serve error = %v", err)
@@ -277,7 +278,7 @@ func TestServeCommandDefaultAddress(t *testing.T) {
 	}
 	cmd := newRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
-	}, time.Now, listen)
+	}, time.Now, listen, defaultMCPRun)
 
 	if err := execute(cmd, "serve"); err != nil {
 		t.Fatalf("execute serve error = %v", err)
@@ -295,7 +296,7 @@ func TestServeCommandStoreOpenFailure(t *testing.T) {
 	}
 	cmd := newRootCommand(func(context.Context) (Store, error) {
 		return nil, want
-	}, time.Now, listen)
+	}, time.Now, listen, defaultMCPRun)
 
 	err := execute(cmd, "serve")
 	if !errors.Is(err, want) {
@@ -307,7 +308,7 @@ func TestServeCommandHelpMentionsUnauthenticated(t *testing.T) {
 	var out bytes.Buffer
 	cmd := newRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
-	}, time.Now, func(app *fiber.App, addr string) error { return nil })
+	}, time.Now, func(app *fiber.App, addr string) error { return nil }, defaultMCPRun)
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"serve", "--help"})
@@ -328,7 +329,7 @@ func TestServeCommandWiredToServerStoreAdapter(t *testing.T) {
 	}
 	cmd := newRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
-	}, time.Now, listen)
+	}, time.Now, listen, defaultMCPRun)
 
 	if err := execute(cmd, "serve"); err != nil {
 		t.Fatalf("execute serve error = %v", err)
@@ -365,3 +366,135 @@ func httpRequest(t *testing.T, method, path string, body *bytes.Buffer) *http.Re
 // Ensure server.Listen is still the production listen function so the
 // default NewRootCommand callers exercise the real listener wiring.
 var _ = server.Listen
+
+func TestMCPCommandHTTPWithoutAuthFailsFast(t *testing.T) {
+	t.Setenv("FINCH_MCP_READ_TOKEN", "")
+	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+
+	called := false
+	cmd := NewRootCommand(func(context.Context) (Store, error) {
+		called = true
+		return fakeStore{}, nil
+	}, time.Now)
+	err := execute(cmd, "mcp", "--transport", "http")
+	if err == nil {
+		t.Fatal("expected error when HTTP transport has no auth tokens")
+	}
+	if !strings.Contains(err.Error(), "FINCH_MCP") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatal("store should not be opened when auth tokens are missing")
+	}
+}
+
+func TestMCPCommandHTTPDefaultsToAddrColon3333(t *testing.T) {
+	var out bytes.Buffer
+	cmd := NewRootCommand(func(context.Context) (Store, error) {
+		return fakeStore{}, nil
+	}, time.Now)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"mcp", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("mcp --help error = %v", err)
+	}
+	if !strings.Contains(out.String(), ":3333") {
+		t.Fatalf("mcp --help should document default addr :3333, got:\n%s", out.String())
+	}
+}
+
+func TestMCPCommandHonorsAddrFlag(t *testing.T) {
+	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
+	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+
+	captured := captureMCPAddr(t, []string{"mcp", "--addr", "127.0.0.1:4444"})
+	if captured != "127.0.0.1:4444" {
+		t.Fatalf("captured addr = %q, want 127.0.0.1:4444", captured)
+	}
+}
+
+func TestMCPCommandAddrFlagDefault(t *testing.T) {
+	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
+	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+
+	captured := captureMCPAddr(t, []string{"mcp"})
+	if captured != ":3333" {
+		t.Fatalf("captured addr = %q, want :3333", captured)
+	}
+}
+
+func TestMCPCommandRejectsUnsupportedTransport(t *testing.T) {
+	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
+	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+
+	cmd := NewRootCommand(func(context.Context) (Store, error) {
+		return fakeStore{}, nil
+	}, time.Now)
+	err := execute(cmd, "mcp", "--transport", "websocket")
+	if err == nil {
+		t.Fatal("expected error for unsupported transport")
+	}
+	if !strings.Contains(err.Error(), "unsupported MCP transport") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPCommandHelpMentionsHTTPSAndWriteToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := NewRootCommand(func(context.Context) (Store, error) {
+		return fakeStore{}, nil
+	}, time.Now)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"mcp", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("mcp --help error = %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "HTTPS") {
+		t.Fatalf("mcp --help should mention HTTPS, got:\n%s", got)
+	}
+	if !strings.Contains(got, "write") || !strings.Contains(got, "read") {
+		t.Fatalf("mcp --help should describe read/write token semantics, got:\n%s", got)
+	}
+}
+
+func TestMCPCommandWithOnlyWriteToken(t *testing.T) {
+	t.Setenv("FINCH_MCP_READ_TOKEN", "")
+	t.Setenv("FINCH_MCP_WRITE_TOKEN", "w")
+
+	called := false
+	mcpRun := func(_ context.Context, _ finchmcp.Transport, _ finchmcp.Options) error {
+		called = true
+		return nil
+	}
+	cmd := newRootCommand(func(context.Context) (Store, error) {
+		return fakeStore{}, nil
+	}, time.Now, func(_ *fiber.App, _ string) error { return nil }, mcpRun)
+	if err := execute(cmd, "mcp"); err != nil {
+		t.Fatalf("execute mcp error = %v", err)
+	}
+	if !called {
+		t.Fatal("mcp command should invoke MCPRunFunc when write token is configured")
+	}
+}
+
+// captureMCPAddr runs the mcp command with the supplied args using a
+// captured MCPRunFunc, and returns the addr value that would have been
+// passed to the listener.
+func captureMCPAddr(t *testing.T, args []string) string {
+	t.Helper()
+	var captured string
+	mcpRun := func(_ context.Context, _ finchmcp.Transport, opts finchmcp.Options) error {
+		captured = opts.Addr
+		return nil
+	}
+	cmd := newRootCommand(func(context.Context) (Store, error) {
+		return fakeStore{}, nil
+	}, time.Now, func(_ *fiber.App, _ string) error { return nil }, mcpRun)
+	if err := execute(cmd, args...); err != nil {
+		t.Fatalf("execute mcp error = %v", err)
+	}
+	return captured
+}
