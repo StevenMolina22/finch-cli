@@ -484,7 +484,7 @@ func readCSVFile(path string) ([]finch.ImportRow, error) {
 			Desc:      getCSVField(fields, colMap, "desc"),
 			Date:      getCSVField(fields, colMap, "date"),
 			Tags:      getCSVField(fields, colMap, "tags"),
-			Recurring:  getCSVField(fields, colMap, "recurring"),
+			Recurring: getCSVField(fields, colMap, "recurring"),
 		}
 		if row.Recurring == `\N` {
 			row.Recurring = ""
@@ -591,13 +591,12 @@ func (a mcpStoreAdapter) Delete(ctx context.Context, id int64) error {
 	return a.store.Delete(ctx, id)
 }
 
-// loadMCPAuthConfig reads the bearer token environment variables used by
-// the HTTP MCP transport. The returned config may be empty; callers must
-// reject HTTP startup when no token is configured.
+// loadMCPAuthConfig reads the bearer API key used by the HTTP MCP transport.
+// The returned config may be empty; callers must reject HTTP startup when no
+// key is configured.
 func loadMCPAuthConfig() finchmcp.AuthConfig {
 	return finchmcp.AuthConfig{
-		ReadToken:  strings.TrimSpace(os.Getenv("FINCH_MCP_READ_TOKEN")),
-		WriteToken: strings.TrimSpace(os.Getenv("FINCH_MCP_WRITE_TOKEN")),
+		APIKey: strings.TrimSpace(os.Getenv("FINCH_API_KEY")),
 	}
 }
 
@@ -611,9 +610,8 @@ func newMCPCommand(openStore OpenStoreFunc, mcpRun MCPRunFunc) *cobra.Command {
 		Long: "Start Finch as an MCP server. The default transport is HTTP on :3333, " +
 			"intended for remote AI clients. Use --transport http --addr to change the listener.\n\n" +
 			"Remote HTTP MCP requires HTTPS in deployment (use a reverse proxy or a hosting " +
-			"platform that terminates TLS). HTTP startup refuses to bind when no auth token is " +
-			"configured via FINCH_MCP_READ_TOKEN and/or FINCH_MCP_WRITE_TOKEN. " +
-			"A write token can call read and write tools; a read token can call read tools only.",
+			"platform that terminates TLS). HTTP startup refuses to bind when no API key is " +
+			"configured via FINCH_API_KEY. The API key can call all read and write tools.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var mcpTransport finchmcp.Transport
@@ -631,7 +629,7 @@ func newMCPCommand(openStore OpenStoreFunc, mcpRun MCPRunFunc) *cobra.Command {
 			if mcpTransport == finchmcp.TransportHTTP {
 				auth := loadMCPAuthConfig()
 				if auth.IsEmpty() {
-					return errors.New("HTTP MCP transport requires FINCH_MCP_READ_TOKEN and/or FINCH_MCP_WRITE_TOKEN")
+					return errors.New("HTTP MCP transport requires FINCH_API_KEY")
 				}
 			}
 

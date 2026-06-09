@@ -43,7 +43,7 @@ func postMCPMessage(t *testing.T, h http.Handler, headers map[string]string, bod
 
 func TestHTTPMCPRejectsMissingBearer(t *testing.T) {
 	store := &fakeStore{}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 	rec := postMCPMessage(t, h, nil, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
@@ -55,7 +55,7 @@ func TestHTTPMCPRejectsMissingBearer(t *testing.T) {
 
 func TestHTTPMCPRejectsInvalidBearer(t *testing.T) {
 	store := &fakeStore{}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer wrong"}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
@@ -67,7 +67,7 @@ func TestHTTPMCPRejectsInvalidBearer(t *testing.T) {
 
 func TestHTTPMCPRejectsMalformedBearer(t *testing.T) {
 	store := &fakeStore{}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Basic abc"}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
@@ -76,19 +76,18 @@ func TestHTTPMCPRejectsMalformedBearer(t *testing.T) {
 
 func TestHTTPMCPAcceptsValidBearer(t *testing.T) {
 	store := &fakeStore{}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
-	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer r"}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
+	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer secret"}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestHTTPMCPDeniesWriteToolForReadToken exercises the full path through
-// the SDK's streamable transport with a read token, ensuring that a
-// write tool call is rejected and no storage mutation occurs.
-func TestHTTPMCPDeniesWriteToolForReadToken(t *testing.T) {
+// TestHTTPMCPPermitsWriteToolForAPIKey exercises the full path through the
+// SDK's streamable transport with the single API key.
+func TestHTTPMCPPermitsWriteToolForAPIKey(t *testing.T) {
 	store := &fakeStore{}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 
 	list, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -106,27 +105,23 @@ func TestHTTPMCPDeniesWriteToolForReadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer r"}, string(list))
+	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer secret"}, string(list))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (protocol-level success, tool-level error), body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "isError") {
-		t.Fatalf("response should mark the call as a tool error: %s", body)
+	if strings.Contains(body, "permission denied") {
+		t.Fatalf("response should not deny the API key: %s", body)
 	}
-	if !strings.Contains(body, "permission denied") {
-		t.Fatalf("response should describe permission denial: %s", body)
-	}
-	if len(store.addInputs) != 0 {
-		t.Fatalf("storage was mutated by read-token caller")
+	if len(store.addInputs) != 1 {
+		t.Fatalf("Add called %d times, want 1", len(store.addInputs))
 	}
 }
 
-// TestHTTPMCPPermitsReadToolForReadToken is a positive counterpart to
-// the previous test, verifying the read path still works through HTTP.
-func TestHTTPMCPPermitsReadToolForReadToken(t *testing.T) {
+// TestHTTPMCPPermitsReadToolForAPIKey verifies the read path works through HTTP.
+func TestHTTPMCPPermitsReadToolForAPIKey(t *testing.T) {
 	store := &fakeStore{summaryV: finch.NewSummary("", 0, 0, nil)}
-	h := newStreamableHandler(store, AuthConfig{ReadToken: "r"})
+	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 
 	list, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -140,7 +135,7 @@ func TestHTTPMCPPermitsReadToolForReadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer r"}, string(list))
+	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer secret"}, string(list))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
@@ -154,7 +149,7 @@ func TestHTTPMCPPermitsReadToolForReadToken(t *testing.T) {
 // canceled. It uses a free port (127.0.0.1:0) to avoid clashes.
 func TestRunHTTPListenAndShutdown(t *testing.T) {
 	store := &fakeStore{}
-	auth := AuthConfig{ReadToken: "r", WriteToken: "w"}
+	auth := AuthConfig{APIKey: "secret"}
 
 	// Find a free port by starting and stopping a temporary listener.
 	tmpListener, err := net.Listen("tcp", "127.0.0.1:0")

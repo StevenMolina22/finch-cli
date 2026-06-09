@@ -463,37 +463,7 @@ func TestDeleteHandlerReturnsNotFoundForMissingTransaction(t *testing.T) {
 	})
 }
 
-func TestReadTokenCanCallReadTools(t *testing.T) {
-	store := &fakeStore{summaryV: finch.NewSummary("", 0, 0, nil)}
-	runWithStore(t, store, func(ctx context.Context) {
-		ctx = WithPermission(ctx, PermissionRead)
-		if res := callTool(t, newTestServer(store), ctx, toolListTransactions, nil); res.IsError {
-			t.Fatalf("read tool denied: %v", textOf(res))
-		}
-		if res := callTool(t, newTestServer(store), ctx, toolGetSummary, nil); res.IsError {
-			t.Fatalf("summary denied: %v", textOf(res))
-		}
-	})
-}
-
-func TestReadTokenCannotCallWriteTools(t *testing.T) {
-	store := &fakeStore{}
-	runWithStore(t, store, func(ctx context.Context) {
-		ctx = WithPermission(ctx, PermissionRead)
-		cases := []string{toolAddTransaction, toolEditTransaction, toolDeleteTransaction}
-		for _, name := range cases {
-			res := callTool(t, newTestServer(store), ctx, name, map[string]any{"confirm": true})
-			if !res.IsError {
-				t.Fatalf("expected %q to be denied for read token", name)
-			}
-		}
-		if len(store.addInputs) != 0 || len(store.editInputs) != 0 || len(store.deletedIDs) != 0 {
-			t.Fatalf("storage was mutated by read-token tool call")
-		}
-	})
-}
-
-func TestWriteTokenCanCallReadAndWriteTools(t *testing.T) {
+func TestAPIKeyPermissionCanCallReadAndWriteTools(t *testing.T) {
 	store := &fakeStore{summaryV: finch.NewSummary("", 0, 0, nil)}
 	runWithStore(t, store, func(ctx context.Context) {
 		ctx = WithPermission(ctx, PermissionWrite)
@@ -523,15 +493,14 @@ func TestAnonymousCannotCallTools(t *testing.T) {
 }
 
 func TestClassifyBearerTokenConstantTime(t *testing.T) {
-	cfg := AuthConfig{ReadToken: "reader", WriteToken: "writer"}
+	cfg := AuthConfig{APIKey: "secret"}
 	cases := []struct {
 		name string
 		in   string
 		want Permission
 	}{
-		{"matches read", "reader", PermissionRead},
-		{"matches write", "writer", PermissionWrite},
-		{"read with extra whitespace", "  reader  ", PermissionRead},
+		{"matches API key", "secret", PermissionWrite},
+		{"API key with extra whitespace", "  secret  ", PermissionWrite},
 		{"mismatched token", "nope", PermissionAnonymous},
 		{"empty token", "", PermissionAnonymous},
 	}
@@ -549,28 +518,21 @@ func TestClassifyBearerTokenConstantTime(t *testing.T) {
 		t.Fatalf("empty config should be anonymous, got %v", got)
 	}
 
-	writeOnly := AuthConfig{WriteToken: "writer"}
-	if got := classifyBearerToken("writer", writeOnly); got != PermissionWrite {
-		t.Fatalf("write-only config should grant write, got %v", got)
-	}
-	if got := classifyBearerToken("reader", writeOnly); got != PermissionAnonymous {
-		t.Fatalf("write-only config should reject read token, got %v", got)
-	}
 }
 
-func TestWriteTokenIncludesReadPermission(t *testing.T) {
-	cfg := AuthConfig{WriteToken: "writer"}
-	if got := classifyBearerToken("writer", cfg); got != PermissionWrite {
-		t.Fatalf("write token should map to write, got %v", got)
+func TestAPIKeyIncludesReadPermission(t *testing.T) {
+	cfg := AuthConfig{APIKey: "secret"}
+	if got := classifyBearerToken("secret", cfg); got != PermissionWrite {
+		t.Fatalf("API key should map to write, got %v", got)
 	}
 	if !PermissionWrite.allowsRead() {
-		t.Fatal("write permission must allow read access")
+		t.Fatal("API key permission must allow read access")
 	}
 }
 
 func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
 	called := false
-	handler := bearerAuthMiddleware(AuthConfig{ReadToken: "r"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	handler := bearerAuthMiddleware(AuthConfig{APIKey: "secret"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called = true
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -593,7 +555,7 @@ func TestAuthMiddlewareRejectsMalformedHeader(t *testing.T) {
 	}
 	for _, header := range cases {
 		t.Run(header, func(t *testing.T) {
-			handler := bearerAuthMiddleware(AuthConfig{ReadToken: "r"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			handler := bearerAuthMiddleware(AuthConfig{APIKey: "secret"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 			req := httptest.NewRequest(http.MethodPost, "/", nil)
 			req.Header.Set("Authorization", header)
 			rec := httptest.NewRecorder()
@@ -606,7 +568,7 @@ func TestAuthMiddlewareRejectsMalformedHeader(t *testing.T) {
 }
 
 func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
-	handler := bearerAuthMiddleware(AuthConfig{ReadToken: "r"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	handler := bearerAuthMiddleware(AuthConfig{APIKey: "secret"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec := httptest.NewRecorder()
@@ -624,11 +586,11 @@ func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
 
 func TestAuthMiddlewarePassesValidToken(t *testing.T) {
 	var seen Permission
-	handler := bearerAuthMiddleware(AuthConfig{ReadToken: "r", WriteToken: "w"}, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := bearerAuthMiddleware(AuthConfig{APIKey: "secret"}, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = PermissionFromContext(r.Context())
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Authorization", "Bearer w")
+	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -640,13 +602,13 @@ func TestAuthMiddlewarePassesValidToken(t *testing.T) {
 }
 
 func TestAuthFailureDoesNotLeakSecrets(t *testing.T) {
-	handler := bearerAuthMiddleware(AuthConfig{ReadToken: "secret-read"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	handler := bearerAuthMiddleware(AuthConfig{APIKey: "secret-configured"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	req.Header.Set("Authorization", "Bearer secret-supplied")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if bytes.Contains([]byte(body), []byte("secret-read")) {
+	if bytes.Contains([]byte(body), []byte("secret-configured")) {
 		t.Fatalf("configured token leaked in response: %q", body)
 	}
 	if bytes.Contains([]byte(body), []byte("secret-supplied")) {
@@ -654,10 +616,10 @@ func TestAuthFailureDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
-func TestRunHTTPFailsFastWithoutAuthTokens(t *testing.T) {
+func TestRunHTTPFailsFastWithoutAPIKey(t *testing.T) {
 	err := RunHTTP(context.Background(), Options{Store: &fakeStore{}})
-	if !errors.Is(err, ErrHTTPNoAuthTokens) {
-		t.Fatalf("err = %v, want ErrHTTPNoAuthTokens", err)
+	if !errors.Is(err, ErrHTTPNoAPIKey) {
+		t.Fatalf("err = %v, want ErrHTTPNoAPIKey", err)
 	}
 }
 

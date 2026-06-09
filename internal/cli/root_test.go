@@ -27,13 +27,13 @@ func (fakeStore) List(context.Context, finch.ListFilter) ([]finch.Transaction, e
 func (fakeStore) Summary(context.Context, string) (finch.Summary, error) {
 	return finch.NewSummary("", 0, 0, nil), nil
 }
-func (fakeStore) Delete(context.Context, int64) error { return nil }
+func (fakeStore) Delete(context.Context, int64) error           { return nil }
 func (fakeStore) Update(context.Context, finch.EditInput) error { return nil }
 func (fakeStore) Export(context.Context, finch.ExportFilter) ([]finch.Transaction, error) {
 	return nil, nil
 }
 func (fakeStore) Import(context.Context, []finch.ImportRow) error { return nil }
-func (fakeStore) Close() error { return nil }
+func (fakeStore) Close() error                                    { return nil }
 
 func TestInvalidAddArgsDoNotOpenStore(t *testing.T) {
 	tests := []struct {
@@ -368,8 +368,7 @@ func httpRequest(t *testing.T, method, path string, body *bytes.Buffer) *http.Re
 var _ = server.Listen
 
 func TestMCPCommandHTTPWithoutAuthFailsFast(t *testing.T) {
-	t.Setenv("FINCH_MCP_READ_TOKEN", "")
-	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+	t.Setenv("FINCH_API_KEY", "")
 
 	called := false
 	cmd := NewRootCommand(func(context.Context) (Store, error) {
@@ -378,13 +377,13 @@ func TestMCPCommandHTTPWithoutAuthFailsFast(t *testing.T) {
 	}, time.Now)
 	err := execute(cmd, "mcp", "--transport", "http")
 	if err == nil {
-		t.Fatal("expected error when HTTP transport has no auth tokens")
+		t.Fatal("expected error when HTTP transport has no API key")
 	}
-	if !strings.Contains(err.Error(), "FINCH_MCP") {
+	if !strings.Contains(err.Error(), "FINCH_API_KEY") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if called {
-		t.Fatal("store should not be opened when auth tokens are missing")
+		t.Fatal("store should not be opened when API key is missing")
 	}
 }
 
@@ -405,8 +404,7 @@ func TestMCPCommandHTTPDefaultsToAddrColon3333(t *testing.T) {
 }
 
 func TestMCPCommandHonorsAddrFlag(t *testing.T) {
-	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
-	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+	t.Setenv("FINCH_API_KEY", "secret")
 
 	captured := captureMCPAddr(t, []string{"mcp", "--addr", "127.0.0.1:4444"})
 	if captured != "127.0.0.1:4444" {
@@ -415,8 +413,7 @@ func TestMCPCommandHonorsAddrFlag(t *testing.T) {
 }
 
 func TestMCPCommandAddrFlagDefault(t *testing.T) {
-	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
-	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+	t.Setenv("FINCH_API_KEY", "secret")
 
 	captured := captureMCPAddr(t, []string{"mcp"})
 	if captured != ":3333" {
@@ -425,8 +422,7 @@ func TestMCPCommandAddrFlagDefault(t *testing.T) {
 }
 
 func TestMCPCommandRejectsUnsupportedTransport(t *testing.T) {
-	t.Setenv("FINCH_MCP_READ_TOKEN", "r")
-	t.Setenv("FINCH_MCP_WRITE_TOKEN", "")
+	t.Setenv("FINCH_API_KEY", "secret")
 
 	cmd := NewRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
@@ -440,7 +436,7 @@ func TestMCPCommandRejectsUnsupportedTransport(t *testing.T) {
 	}
 }
 
-func TestMCPCommandHelpMentionsHTTPSAndWriteToken(t *testing.T) {
+func TestMCPCommandHelpMentionsHTTPSAndAPIKey(t *testing.T) {
 	var out bytes.Buffer
 	cmd := NewRootCommand(func(context.Context) (Store, error) {
 		return fakeStore{}, nil
@@ -455,14 +451,13 @@ func TestMCPCommandHelpMentionsHTTPSAndWriteToken(t *testing.T) {
 	if !strings.Contains(got, "HTTPS") {
 		t.Fatalf("mcp --help should mention HTTPS, got:\n%s", got)
 	}
-	if !strings.Contains(got, "write") || !strings.Contains(got, "read") {
-		t.Fatalf("mcp --help should describe read/write token semantics, got:\n%s", got)
+	if !strings.Contains(got, "FINCH_API_KEY") {
+		t.Fatalf("mcp --help should mention FINCH_API_KEY, got:\n%s", got)
 	}
 }
 
-func TestMCPCommandWithOnlyWriteToken(t *testing.T) {
-	t.Setenv("FINCH_MCP_READ_TOKEN", "")
-	t.Setenv("FINCH_MCP_WRITE_TOKEN", "w")
+func TestMCPCommandWithAPIKey(t *testing.T) {
+	t.Setenv("FINCH_API_KEY", "secret")
 
 	called := false
 	mcpRun := func(_ context.Context, _ finchmcp.Transport, _ finchmcp.Options) error {
@@ -476,7 +471,7 @@ func TestMCPCommandWithOnlyWriteToken(t *testing.T) {
 		t.Fatalf("execute mcp error = %v", err)
 	}
 	if !called {
-		t.Fatal("mcp command should invoke MCPRunFunc when write token is configured")
+		t.Fatal("mcp command should invoke MCPRunFunc when API key is configured")
 	}
 }
 

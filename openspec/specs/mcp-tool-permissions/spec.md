@@ -6,23 +6,23 @@ TBD - created by archiving change add-remote-mcp-server. Update Purpose after ar
 ### Requirement: Read tool permission
 The system SHALL classify `finch_list_transactions` and `finch_get_summary` as read tools.
 
-#### Scenario: Read token calls read tool
-- **WHEN** an HTTP MCP client authenticates with `FINCH_MCP_READ_TOKEN` and calls `finch_list_transactions` or `finch_get_summary`
+#### Scenario: API key calls read tool
+- **WHEN** an HTTP MCP client authenticates with `FINCH_API_KEY` and calls `finch_list_transactions` or `finch_get_summary`
 - **THEN** the system allows the tool call subject to normal input validation
 
 ### Requirement: Write tool permission
 The system SHALL classify `finch_add_transaction`, `finch_edit_transaction`, and `finch_delete_transaction` as write tools.
 
-#### Scenario: Write token calls write tool
-- **WHEN** an HTTP MCP client authenticates with `FINCH_MCP_WRITE_TOKEN` and calls a write tool
+#### Scenario: API key calls write tool
+- **WHEN** an HTTP MCP client authenticates with `FINCH_API_KEY` and calls a write tool
 - **THEN** the system allows the tool call subject to normal input validation and confirmation requirements
 
-### Requirement: Read token write denial
-The system SHALL prevent clients authenticated with `FINCH_MCP_READ_TOKEN` from calling write tools.
+### Requirement: Single API key permissions
+The system SHALL use one API key for both read and write MCP tools.
 
-#### Scenario: Read token calls write tool
-- **WHEN** an HTTP MCP client authenticates with `FINCH_MCP_READ_TOKEN` and calls `finch_add_transaction`, `finch_edit_transaction`, or `finch_delete_transaction`
-- **THEN** the system rejects the tool call without mutating transactions
+#### Scenario: API key calls write tools
+- **WHEN** an HTTP MCP client authenticates with `FINCH_API_KEY` and calls `finch_add_transaction`, `finch_edit_transaction`, or `finch_delete_transaction`
+- **THEN** the system allows the tool call subject to normal input validation and confirmation requirements
 
 ### Requirement: Unauthenticated tool denial
 The system SHALL prevent unauthenticated HTTP MCP clients from calling any MCP tool.

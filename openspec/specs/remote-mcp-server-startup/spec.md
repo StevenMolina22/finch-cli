@@ -39,10 +39,10 @@ The system SHALL reject unsupported `--transport` values before opening the MCP 
 - **THEN** the command fails with a clear unsupported transport error
 
 ### Requirement: HTTP auth startup configuration
-The system SHALL fail fast before binding an HTTP MCP listener when HTTP transport is requested and no MCP bearer token is configured.
+The system SHALL fail fast before binding an HTTP MCP listener when HTTP transport is requested and no API key is configured.
 
-#### Scenario: HTTP startup without auth tokens
-- **WHEN** the user runs `finch mcp --transport http` without `FINCH_MCP_READ_TOKEN` and without `FINCH_MCP_WRITE_TOKEN`
+#### Scenario: HTTP startup without API key
+- **WHEN** the user runs `finch mcp --transport http` without `FINCH_API_KEY`
 - **THEN** the command fails with a clear startup error before accepting HTTP requests
 
 ### Requirement: Stdio transport optionality

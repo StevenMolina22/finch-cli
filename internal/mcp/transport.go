@@ -39,9 +39,8 @@ type Options struct {
 // is not one of the supported values.
 var ErrUnsupportedTransport = errors.New("unsupported MCP transport")
 
-// ErrHTTPNoAuthTokens is returned by RunHTTP when neither FINCH_MCP_READ_TOKEN
-// nor FINCH_MCP_WRITE_TOKEN is configured.
-var ErrHTTPNoAuthTokens = errors.New("HTTP MCP transport requires FINCH_MCP_READ_TOKEN and/or FINCH_MCP_WRITE_TOKEN to be set")
+// ErrHTTPNoAPIKey is returned by RunHTTP when FINCH_API_KEY is not configured.
+var ErrHTTPNoAPIKey = errors.New("HTTP MCP transport requires FINCH_API_KEY to be set")
 
 // Run starts the MCP server using the given transport and blocks until
 // the context is canceled or a fatal transport error occurs.
@@ -61,7 +60,7 @@ func Run(ctx context.Context, transport Transport, opts Options) error {
 // when the listener stops or the context is canceled.
 func RunHTTP(ctx context.Context, opts Options) error {
 	if opts.Auth.IsEmpty() {
-		return ErrHTTPNoAuthTokens
+		return ErrHTTPNoAPIKey
 	}
 	if opts.Addr == "" {
 		opts.Addr = ":3333"

@@ -7,17 +7,16 @@ import (
 	"strings"
 )
 
-// AuthConfig holds the bearer token values used to authenticate HTTP MCP
-// requests. Either or both may be empty; startup validation in RunHTTP
-// ensures at least one is present when serving HTTP transport.
+// AuthConfig holds the bearer token value used to authenticate HTTP MCP
+// requests. Startup validation in RunHTTP ensures it is present when
+// serving HTTP transport.
 type AuthConfig struct {
-	ReadToken  string
-	WriteToken string
+	APIKey string
 }
 
-// IsEmpty reports whether neither token is configured.
+// IsEmpty reports whether no API key is configured.
 func (c AuthConfig) IsEmpty() bool {
-	return strings.TrimSpace(c.ReadToken) == "" && strings.TrimSpace(c.WriteToken) == ""
+	return strings.TrimSpace(c.APIKey) == ""
 }
 
 // authFailureStatus is the status returned to clients when bearer token
@@ -30,21 +29,15 @@ const authFailureStatus = "401 Unauthorized"
 const bearerPrefix = "bearer "
 
 // classifyBearerToken compares a supplied bearer token against the
-// configured read and write tokens using constant-time comparison. It
-// returns the permission granted by the supplied token, or
-// PermissionAnonymous if the token is missing, malformed, or does not
-// match a configured token.
+// configured API key using constant-time comparison. A matching key grants
+// full tool access; otherwise the caller remains anonymous.
 func classifyBearerToken(supplied string, cfg AuthConfig) Permission {
 	trimmed := strings.TrimSpace(supplied)
 	if trimmed == "" {
 		return PermissionAnonymous
 	}
-	read := strings.TrimSpace(cfg.ReadToken)
-	if read != "" && subtle.ConstantTimeCompare([]byte(trimmed), []byte(read)) == 1 {
-		return PermissionRead
-	}
-	write := strings.TrimSpace(cfg.WriteToken)
-	if write != "" && subtle.ConstantTimeCompare([]byte(trimmed), []byte(write)) == 1 {
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if apiKey != "" && subtle.ConstantTimeCompare([]byte(trimmed), []byte(apiKey)) == 1 {
 		return PermissionWrite
 	}
 	return PermissionAnonymous

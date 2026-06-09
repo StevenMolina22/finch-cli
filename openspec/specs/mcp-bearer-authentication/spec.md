@@ -15,17 +15,17 @@ The system SHALL require `Authorization: Bearer <token>` authentication for ever
 - **THEN** the system rejects the request before executing any MCP tool
 
 ### Requirement: Token sources
-The system SHALL read MCP HTTP authentication tokens from `FINCH_MCP_READ_TOKEN` and `FINCH_MCP_WRITE_TOKEN`.
+The system SHALL read MCP HTTP authentication from `FINCH_API_KEY`.
 
-#### Scenario: Tokens loaded from environment
-- **WHEN** the MCP HTTP server starts with one or both MCP token environment variables configured
-- **THEN** the system uses those token values for HTTP MCP authentication
+#### Scenario: API key loaded from environment
+- **WHEN** the MCP HTTP server starts with `FINCH_API_KEY` configured
+- **THEN** the system uses that key value for HTTP MCP authentication
 
 ### Requirement: Invalid token rejection
-The system SHALL reject bearer tokens that do not match a configured read or write token.
+The system SHALL reject bearer tokens that do not match the configured API key.
 
 #### Scenario: Invalid bearer token
-- **WHEN** an HTTP MCP client sends a bearer token that does not match any configured MCP token
+- **WHEN** an HTTP MCP client sends a bearer token that does not match the configured API key
 - **THEN** the system rejects the request before executing any MCP tool
 
 ### Requirement: Secret-safe authentication
@@ -42,9 +42,9 @@ The system SHALL compare supplied bearer tokens to configured token values using
 - **WHEN** the system validates a supplied bearer token
 - **THEN** token equality is evaluated without early-return string comparison that leaks matching prefixes
 
-### Requirement: Write token includes read access
-The system SHALL allow a valid `FINCH_MCP_WRITE_TOKEN` token to authenticate both read and write MCP tool requests.
+### Requirement: API key includes full access
+The system SHALL allow a valid `FINCH_API_KEY` token to authenticate both read and write MCP tool requests.
 
-#### Scenario: Only write token configured
-- **WHEN** HTTP MCP starts with only `FINCH_MCP_WRITE_TOKEN` configured
-- **THEN** clients authenticated with the write token can call both read and write MCP tools
+#### Scenario: API key configured
+- **WHEN** HTTP MCP starts with `FINCH_API_KEY` configured
+- **THEN** clients authenticated with the API key can call both read and write MCP tools

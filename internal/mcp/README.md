@@ -31,6 +31,6 @@ transport or required auth behavior, document the blocker in
 
 - Bearer tokens are compared using `crypto/subtle.ConstantTimeCompare` and
   are never logged or included in error messages.
-- HTTP startup fails fast when no read or write token is configured.
+- HTTP startup fails fast when no API key is configured.
 - Tool handlers re-check the permission from context for each call, so
   tool-level enforcement is independent of the HTTP middleware.
