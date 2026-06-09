@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -66,18 +68,9 @@ func RunHTTP(ctx context.Context, opts Options) error {
 		opts.Addr = ":3333"
 	}
 
-	server := NewServer(opts.Store)
-	handler := mcpsdk.NewStreamableHTTPHandler(
-		func(*http.Request) *mcpsdk.Server { return server },
-		&mcpsdk.StreamableHTTPOptions{Stateless: true},
-	)
-
-	mux := http.NewServeMux()
-	mux.Handle("/", bearerAuthMiddleware(opts.Auth, handler))
-
 	httpServer := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           mux,
+		Handler:           NewHTTPHandler(opts.Store, opts.Auth),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -97,6 +90,120 @@ func RunHTTP(ctx context.Context, opts Options) error {
 			return nil
 		}
 		return err
+	}
+}
+
+// NewHTTPHandler constructs the production HTTP routing layer for Finch MCP.
+// Documentation routes are public, while the MCP transport is isolated at
+// /mcp and protected by bearer authentication.
+func NewHTTPHandler(store Store, auth AuthConfig) http.Handler {
+	server := NewServer(store)
+	streamable := mcpsdk.NewStreamableHTTPHandler(
+		func(*http.Request) *mcpsdk.Server { return server },
+		&mcpsdk.StreamableHTTPOptions{Stateless: true},
+	)
+	authenticatedMCP := bearerAuthMiddleware(auth, streamable)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleDocsLanding)
+	mux.HandleFunc("/llms.txt", handleLLMsDocs)
+	mux.HandleFunc("/.well-known/mcp.json", handleMCPMetadata)
+	mux.Handle("/mcp", authenticatedMCP)
+	mux.Handle("/mcp/", authenticatedMCP)
+	return mux
+}
+
+func handleDocsLanding(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Finch MCP</title></head>
+<body>
+<main>
+<h1>Finch MCP</h1>
+<p>Finch is an MCP server for agents, not a browser app.</p>
+<p>MCP endpoint: <code>/mcp</code></p>
+<p>Authentication: <code>Authorization: Bearer &lt;API_KEY&gt;</code></p>
+<h2>Minimal MCP client config</h2>
+<pre><code>{
+  "mcpServers": {
+    "finch": {
+      "url": "https://your-finch-host.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer &lt;API_KEY&gt;"
+      }
+    }
+  }
+}</code></pre>
+<h2>Tools</h2>
+<ul>
+%s
+</ul>
+<p>AI-readable docs: <a href="/llms.txt">/llms.txt</a></p>
+</main>
+</body>
+</html>
+`, htmlToolList())
+}
+
+func htmlToolList() string {
+	var b strings.Builder
+	for _, name := range ToolNames() {
+		_, _ = fmt.Fprintf(&b, "<li><code>%s</code></li>\n", name)
+	}
+	return b.String()
+}
+
+func handleLLMsDocs(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprintf(w, `# Finch MCP
+
+Base URL: use the deployed Finch MCP server origin.
+MCP endpoint: /mcp
+Transport: Streamable HTTP
+Authentication: Authorization: Bearer <API_KEY>
+
+Tools:
+%s
+Usage notes:
+- Finch is an MCP server for agents, not a browser app.
+- Send MCP JSON-RPC requests to /mcp.
+- Documentation routes are public and do not require MCP initialization.
+- Mutating tools may require confirm=true.
+- Never expose real API keys in prompts, code, or docs.
+`, plainToolList())
+}
+
+func plainToolList() string {
+	var b strings.Builder
+	for _, name := range ToolNames() {
+		_, _ = fmt.Fprintf(&b, "- %s\n", name)
+	}
+	return b.String()
+}
+
+func handleMCPMetadata(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	metadata := map[string]any{
+		"name":      serverName,
+		"version":   serverVersion,
+		"transport": "streamable-http",
+		"endpoint":  "/mcp",
+		"auth": map[string]string{
+			"type": "bearer",
+		},
+		"docs": map[string]string{
+			"human": "/",
+			"llms":  "/llms.txt",
+		},
+		"tools": ToolNames(),
+	}
+	if err := json.NewEncoder(w).Encode(metadata); err != nil {
+		http.Error(w, "encode metadata", http.StatusInternalServerError)
 	}
 }
 

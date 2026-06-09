@@ -608,7 +608,8 @@ func newMCPCommand(openStore OpenStoreFunc, mcpRun MCPRunFunc) *cobra.Command {
 		Use:   "mcp",
 		Short: "Start the MCP (Model Context Protocol) server",
 		Long: "Start Finch as an MCP server. The default transport is HTTP on :3333, " +
-			"intended for remote AI clients. Use --transport http --addr to change the listener.\n\n" +
+			"intended for remote AI clients. MCP clients connect to /mcp. " +
+			"Use --transport http --addr to change the listener.\n\n" +
 			"Remote HTTP MCP requires HTTPS in deployment (use a reverse proxy or a hosting " +
 			"platform that terminates TLS). HTTP startup refuses to bind when no API key is " +
 			"configured via FINCH_API_KEY. The API key can call all read and write tools.",

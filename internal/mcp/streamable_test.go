@@ -12,25 +12,18 @@ import (
 	"time"
 
 	"finch/internal/finch"
-
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // newStreamableHandler builds a fully wired HTTP handler that combines
 // the SDK's streamable transport with the auth middleware. The returned
 // handler is suitable for use with httptest.
 func newStreamableHandler(store Store, auth AuthConfig) http.Handler {
-	server := NewServer(store)
-	streamable := mcpsdk.NewStreamableHTTPHandler(
-		func(*http.Request) *mcpsdk.Server { return server },
-		&mcpsdk.StreamableHTTPOptions{Stateless: true},
-	)
-	return bearerAuthMiddleware(auth, streamable)
+	return NewHTTPHandler(store, auth)
 }
 
 func postMCPMessage(t *testing.T, h http.Handler, headers map[string]string, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for k, v := range headers {
@@ -78,6 +71,116 @@ func TestHTTPMCPAcceptsValidBearer(t *testing.T) {
 	store := &fakeStore{}
 	h := newStreamableHandler(store, AuthConfig{APIKey: "secret"})
 	rec := postMCPMessage(t, h, map[string]string{"Authorization": "Bearer secret"}, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPDocsRoutesArePublic(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHTTPHandler(store, AuthConfig{APIKey: "secret"})
+
+	cases := []struct {
+		path        string
+		contentType string
+		contains    []string
+	}{
+		{
+			path:        "/",
+			contentType: "text/html",
+			contains: []string{
+				"Finch is an MCP server for agents, not a browser app.",
+				"/mcp",
+				"Authorization: Bearer &lt;API_KEY&gt;",
+				toolAddTransaction,
+			},
+		},
+		{
+			path:        "/llms.txt",
+			contentType: "text/plain",
+			contains: []string{
+				"MCP endpoint: /mcp",
+				"Authentication: Authorization: Bearer <API_KEY>",
+				toolListTransactions,
+			},
+		},
+		{
+			path:        "/.well-known/mcp.json",
+			contentType: "application/json",
+			contains: []string{
+				`"name":"finch-mcp"`,
+				`"endpoint":"/mcp"`,
+				`"type":"bearer"`,
+				toolDeleteTransaction,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); !strings.Contains(got, tc.contentType) {
+				t.Fatalf("content type = %q, want %q", got, tc.contentType)
+			}
+			body := rec.Body.String()
+			if strings.Contains(body, "secret") {
+				t.Fatalf("docs leaked configured secret: %s", body)
+			}
+			for _, want := range tc.contains {
+				if !strings.Contains(body, want) {
+					t.Fatalf("body missing %q: %s", want, body)
+				}
+			}
+		})
+	}
+}
+
+func TestRootNoLongerHandlesMCP(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHTTPHandler(store, AuthConfig{APIKey: "secret"})
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want docs response", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"jsonrpc"`) || strings.Contains(body, `"protocolVersion"`) {
+		t.Fatalf("root should not return MCP protocol response: %s", body)
+	}
+	if !strings.Contains(body, "Finch is an MCP server") {
+		t.Fatalf("root should return docs, got: %s", body)
+	}
+}
+
+func TestHTTPMCPRejectsMissingBearerAtMCPPath(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHTTPHandler(store, AuthConfig{APIKey: "secret"})
+	rec := postMCPMessage(t, h, nil, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestHTTPMCPAcceptsTrailingSlash(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHTTPHandler(store, AuthConfig{APIKey: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/mcp/", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
@@ -170,7 +273,7 @@ func TestRunHTTPListenAndShutdown(t *testing.T) {
 
 	// Make a request that should be rejected by auth.
 	client := &http.Client{Timeout: 2 * time.Second}
-	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)))
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := client.Do(req)

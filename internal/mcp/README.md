@@ -27,6 +27,13 @@ transport or required auth behavior, document the blocker in
 | `handlers.go`       | Per-tool handlers that delegate to `internal/finch` validation and storage. |
 | `transport.go`      | `Run` entry point and HTTP transport startup with auth middleware.      |
 
+## HTTP routes
+
+- `/mcp` is the Streamable HTTP MCP endpoint and requires `Authorization: Bearer <API_KEY>`.
+- `/` is a public landing page explaining how agents should connect.
+- `/llms.txt` is public AI-readable usage documentation.
+- `/.well-known/mcp.json` is public machine-readable MCP metadata.
+
 ## Security notes
 
 - Bearer tokens are compared using `crypto/subtle.ConstantTimeCompare` and

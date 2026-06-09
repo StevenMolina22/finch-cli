@@ -23,6 +23,17 @@ const (
 	toolDeleteTransaction = "finch_delete_transaction"
 )
 
+// ToolNames returns the public Finch MCP tool names in registration order.
+func ToolNames() []string {
+	return []string{
+		toolAddTransaction,
+		toolListTransactions,
+		toolGetSummary,
+		toolEditTransaction,
+		toolDeleteTransaction,
+	}
+}
+
 // NewServer constructs an MCP server with all Finch transaction tools
 // registered. The store is invoked directly from tool handlers; tests may
 // substitute a fake implementation.
@@ -83,14 +94,14 @@ func registerTools(s *mcpsdk.Server, store Store) {
 		Name:        toolAddTransaction,
 		Description: "Add an income or expense transaction. If date is omitted, the current UTC date is used.",
 		InputSchema: toolSchema(map[string]any{
-			"type":        schemaString(`Transaction type. Must be "income" or "expense".`),
-			"amount":      schemaString(`Amount as a positive decimal string, e.g. "12.34".`),
-			"category":    schemaString("Category label, e.g. \"groceries\"."),
-			"desc":        schemaString("Optional description."),
-			"date":        schemaStringWithDefault("Optional date in YYYY-MM-DD. Defaults to today (UTC).", ""),
-			"tags":        schemaString("Optional comma-separated tags."),
-			"recurring":   schemaString(`Optional recurrence: "monthly", "weekly", or "yearly".`),
-			"confirm":     schemaBool("Set true to confirm. Required for destructive tools, optional for add."),
+			"type":      schemaString(`Transaction type. Must be "income" or "expense".`),
+			"amount":    schemaString(`Amount as a positive decimal string, e.g. "12.34".`),
+			"category":  schemaString("Category label, e.g. \"groceries\"."),
+			"desc":      schemaString("Optional description."),
+			"date":      schemaStringWithDefault("Optional date in YYYY-MM-DD. Defaults to today (UTC).", ""),
+			"tags":      schemaString("Optional comma-separated tags."),
+			"recurring": schemaString(`Optional recurrence: "monthly", "weekly", or "yearly".`),
+			"confirm":   schemaBool("Set true to confirm. Required for destructive tools, optional for add."),
 		}, []string{"type", "amount", "category"}),
 	}, makeAddHandler(store, nowFn))
 
@@ -181,7 +192,7 @@ func requireWrite(ctx context.Context, tool string) *mcpsdk.CallToolResult {
 // adapter satisfies the Store interface and that finch.ErrTransactionNotFound
 // is the sentinel used by handlers.
 var (
-	_ Store              = StoreAdapter{}
-	_ = finch.ErrTransactionNotFound
-	_ = errors.Is
+	_ Store = StoreAdapter{}
+	_       = finch.ErrTransactionNotFound
+	_       = errors.Is
 )

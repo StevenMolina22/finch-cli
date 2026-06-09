@@ -11,11 +11,11 @@ The system SHALL provide `finch mcp` to start Finch as an MCP server without req
 - **THEN** the system starts an MCP HTTP server and exposes Finch MCP tools through that server
 
 ### Requirement: HTTP transport
-The system SHALL support HTTP transport for remote MCP clients.
+The system SHALL support HTTP transport for remote MCP clients at the `/mcp` endpoint.
 
 #### Scenario: HTTP transport selected
 - **WHEN** the user runs `finch mcp --transport http`
-- **THEN** the system starts the MCP server using HTTP transport
+- **THEN** the system starts the MCP server using HTTP transport and exposes MCP protocol traffic at `/mcp`
 
 ### Requirement: Default HTTP address
 The system SHALL default the HTTP MCP listen address to `:3333` when `--addr` is not supplied.
@@ -53,8 +53,8 @@ The system MAY support stdio transport for local MCP clients, but HTTP transport
 - **THEN** the command fails with a clear unsupported transport error while `--transport http` remains supported
 
 ### Requirement: Remote deployment guidance
-The system SHALL document that remote HTTP MCP deployments require HTTPS, including deployments where TLS is terminated by a reverse proxy or hosting platform.
+The system SHALL document that remote HTTP MCP deployments require HTTPS, including deployments where TLS is terminated by a reverse proxy or hosting platform, and SHALL identify `/mcp` as the remote MCP endpoint.
 
 #### Scenario: User reviews MCP usage guidance
 - **WHEN** a user reviews MCP command help or project documentation
-- **THEN** the system communicates that remote HTTP MCP must be deployed behind HTTPS
+- **THEN** the system communicates that remote HTTP MCP must be deployed behind HTTPS and that MCP clients should connect to `/mcp`
