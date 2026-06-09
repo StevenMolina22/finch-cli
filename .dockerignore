@@ -1,0 +1,8 @@
+.git
+.env
+*.db
+*.sqlite
+*.sqlite3
+tmp
+dist
+coverage.out
